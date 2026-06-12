@@ -2,9 +2,9 @@
 
 on:
   schedule:
-    - cron: ''*/30 * * * *''
+    - cron: '*/30 * * * *'
   workflow_dispatch:
-    description: ''Trigger manual untuk tes notifikasi''
+    description: 'Trigger manual untuk tes notifikasi'
 
 permissions:
   contents: write
@@ -21,15 +21,15 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: ''20''
+          node-version: '20'
       - name: Run check
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: node scripts/check-bansos.mjs
       - name: Commit state if changed
         run: |
-          git config user.name ''bansos-watcher-bot''
-          git config user.email ''bansos-watcher-bot@users.noreply.github.com''
+          git config user.name 'bansos-watcher-bot'
+          git config user.email 'bansos-watcher-bot@users.noreply.github.com'
           git add state.json
-          git diff --cached --quiet || git commit -m ''chore(state): update bansos state [skip ci]''
-          git push || echo ''Nothing to commit or push failed''
+          git diff --cached --quiet || git commit -m 'chore(state): update bansos state [skip ci]'
+          git push || echo 'Nothing to commit or push failed'
