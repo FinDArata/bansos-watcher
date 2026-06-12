@@ -1,4 +1,11 @@
-﻿{
-  "slugs": [],
-  "updatedAt": "2026-06-12T00:00:00.000Z"
+{
+  "slugs": [
+    "namecom-domain-app",
+    "tokenrouter-model-gateway",
+    "deepseek-free-token",
+    "inceptionlabs-get-started",
+    "kimchi-dev-serverless-ai",
+    "kie-ai-api-discount-credit"
+  ],
+  "updatedAt": "2026-06-12T17:27:25.547Z"
 }
