@@ -1,4 +1,4 @@
-﻿// Bansos Watcher
+// Bansos Watcher
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,9 +35,9 @@ function parseCards(html) {
   const Q = String.fromCharCode(34);
   const startTag = String.fromCharCode(60) + 'article';
   const endTag = String.fromCharCode(60) + '/article' + String.fromCharCode(62);
-  const linkPrefix = 'href=' + Q + '/list/';
   const titleStart = String.fromCharCode(60) + 'h2';
   const titleEnd = String.fromCharCode(60) + '/h2' + String.fromCharCode(62);
+  const linkPrefixes = ['href=' + Q + '../list/', 'href=' + Q + '/list/'];
   let pos = 0;
   while (pos < html.length) {
     const a = html.indexOf(startTag, pos);
@@ -47,11 +47,15 @@ function parseCards(html) {
     const body = html.slice(a, b + endTag.length);
     pos = b + endTag.length;
     if (body.indexOf('bansos-card') < 0) continue;
-    const li = body.indexOf(linkPrefix);
+    let li = -1, prefixLen = 0;
+    for (const p of linkPrefixes) {
+      const idx = body.indexOf(p);
+      if (idx >= 0) { li = idx; prefixLen = p.length; break; }
+    }
     if (li < 0) continue;
-    const lj = body.indexOf(Q, li + linkPrefix.length);
+    const lj = body.indexOf(Q, li + prefixLen);
     if (lj < 0) continue;
-    const slug = body.slice(li + linkPrefix.length, lj);
+    const slug = body.slice(li + prefixLen, lj);
     const slugOk = /^[a-zA-Z0-9_-]+$/.test(slug);
     if (!slugOk) continue;
     if (slugs.has(slug)) continue;
@@ -62,7 +66,7 @@ function parseCards(html) {
       const tend = body.indexOf(titleEnd, ti);
       if (tend > ti) {
         title = body.slice(ti, tend + titleEnd.length);
-        title = title.replace(/<[^>]+>/g, '').replace(/\\s+/g, ' ').trim();
+        title = title.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
         if (!title) title = slug;
       }
     }
@@ -155,4 +159,3 @@ main().catch(function (e) {
   console.error('ERROR:', e.message);
   process.exit(1);
 });
-
