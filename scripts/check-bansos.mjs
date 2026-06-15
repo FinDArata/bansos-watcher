@@ -1,78 +1,54 @@
-// Bansos Watcher
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+﻿// Bansos Watcher - fetch upstream JSON, diff ids, notify Discord.
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const STATE_PATH = path.join(__dirname, '..', 'state.json');
-const LIST_URL = 'https://bansos.dev/list/';
+const STATE_PATH = path.join(__dirname, "..", "state.json");
+// Upstream JSON: same data source used by bansos.dev SvelteKit site.
+const JSON_URL = "https://raw.githubusercontent.com/wauputr4/bansos/main/src/lib/data/bansos.json";
+// Fallback HTML scrape in case JSON is unavailable.
+const LIST_URL = "https://bansos.dev/list/";
 
 function loadState() {
   try {
-    const raw = fs.readFileSync(STATE_PATH, 'utf8');
+    const raw = fs.readFileSync(STATE_PATH, "utf8");
     const j = JSON.parse(raw);
-    return Array.isArray(j.slugs) ? j.slugs : [];
+    return Array.isArray(j.ids) ? j.ids : [];
   } catch {
     return [];
   }
 }
 
-function saveState(slugs) {
-  const tmp = STATE_PATH + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({ slugs: slugs, updatedAt: new Date().toISOString() }, null, 2), 'utf8');
+function saveState(ids) {
+  const tmp = STATE_PATH + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify({ ids: ids, updatedAt: new Date().toISOString() }, null, 2), "utf8");
   fs.renameSync(tmp, STATE_PATH);
 }
 
-async function fetchList() {
-  const r = await fetch(LIST_URL, { headers: { 'User-Agent': 'bansos-watcher/1.0' } });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return await r.text();
+async function fetchJson() {
+  const r = await fetch(JSON_URL, { headers: { "User-Agent": "bansos-watcher/2.0" } });
+  if (!r.ok) throw new Error("JSON HTTP " + r.status);
+  return await r.json();
 }
 
-function parseCards(html) {
-  const slugs = new Set();
-  const titles = new Map();
-  const Q = String.fromCharCode(34);
-  const startTag = String.fromCharCode(60) + 'article';
-  const endTag = String.fromCharCode(60) + '/article' + String.fromCharCode(62);
-  const titleStart = String.fromCharCode(60) + 'h2';
-  const titleEnd = String.fromCharCode(60) + '/h2' + String.fromCharCode(62);
-  const linkPrefixes = ['href=' + Q + '../list/', 'href=' + Q + '/list/'];
-  let pos = 0;
-  while (pos < html.length) {
-    const a = html.indexOf(startTag, pos);
-    if (a < 0) break;
-    const b = html.indexOf(endTag, a);
-    if (b < 0) break;
-    const body = html.slice(a, b + endTag.length);
-    pos = b + endTag.length;
-    if (body.indexOf('bansos-card') < 0) continue;
-    let li = -1, prefixLen = 0;
-    for (const p of linkPrefixes) {
-      const idx = body.indexOf(p);
-      if (idx >= 0) { li = idx; prefixLen = p.length; break; }
-    }
-    if (li < 0) continue;
-    const lj = body.indexOf(Q, li + prefixLen);
-    if (lj < 0) continue;
-    const slug = body.slice(li + prefixLen, lj);
-    const slugOk = /^[a-zA-Z0-9_-]+$/.test(slug);
-    if (!slugOk) continue;
-    if (slugs.has(slug)) continue;
-    slugs.add(slug);
-    let title = slug;
-    const ti = body.indexOf(titleStart);
-    if (ti >= 0) {
-      const tend = body.indexOf(titleEnd, ti);
-      if (tend > ti) {
-        title = body.slice(ti, tend + titleEnd.length);
-        title = title.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-        if (!title) title = slug;
-      }
-    }
-    titles.set(slug, title);
+async function fetchHtmlFallback() {
+  const r = await fetch(LIST_URL, { headers: { "User-Agent": "bansos-watcher/2.0" } });
+  if (!r.ok) throw new Error("HTML HTTP " + r.status);
+  const html = await r.text();
+  const ids = new Set();
+  const re = /href="(?:\.\.\/)?\/list\/([a-zA-Z0-9_-]+)\/?\//g;
+  let m;
+  while ((m = re.exec(html)) !== null) ids.add(m[1]);
+  return { ids: Array.from(ids), titles: new Map() };
+}
+
+function buildIdTitleMap(items) {
+  const m = new Map();
+  for (const it of items) {
+    if (it && typeof it.id === "string") m.set(it.id, it.title || it.id);
   }
-  return { slugs: Array.from(slugs), titles: titles };
+  return m;
 }
 
 function diff(prev, curr) {
@@ -84,10 +60,14 @@ function diff(prev, curr) {
 }
 
 async function postDiscord(webhook, payload) {
-  const r = await fetch(webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const r = await fetch(webhook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
   if (!r.ok) {
     const t = await r.text();
-    throw new Error('Discord webhook ' + r.status + ': ' + t);
+    throw new Error("Discord webhook " + r.status + ": " + t);
   }
 }
 
@@ -99,27 +79,31 @@ function buildEmbed(opts) {
   const fields = [];
   if (added.length) {
     fields.push({
-      name: 'Bertambah (' + added.length + ')',
-      value: added.map(function (s) { return '- ' + (titles.get(s) || s) + '  https://bansos.dev/list/' + s + '/'; }).join(String.fromCharCode(10)).slice(0, 1024),
+      name: "Bertambah (" + added.length + ")",
+      value: added.map(function (s) {
+        return "- " + (titles.get(s) || s) + "  https://bansos.dev/list/" + s + "/";
+      }).join(String.fromCharCode(10)).slice(0, 1024),
       inline: false,
     });
   }
   if (removed.length) {
     fields.push({
-      name: 'Berkurang (' + removed.length + ')',
-      value: removed.map(function (s) { return '- ' + (titles.get(s) || s); }).join(String.fromCharCode(10)).slice(0, 1024),
+      name: "Berkurang (" + removed.length + ")",
+      value: removed.map(function (s) {
+        return "- " + (titles.get(s) || s);
+      }).join(String.fromCharCode(10)).slice(0, 1024),
       inline: false,
     });
   }
   return {
-    username: 'Bansos Watcher',
+    username: "Bansos Watcher",
     embeds: [{
-      title: 'Daftar Bansos.dev Berubah',
-      description: 'Total item aktif: ' + total,
+      title: "Daftar Bansos.dev Berubah",
+      description: "Total item aktif: " + total,
       color: added.length > 0 ? 0x22c55e : 0xef4444,
       fields: fields,
       timestamp: new Date().toISOString(),
-      footer: { text: 'bansos-watcher (cron */30 * * * *)' },
+      footer: { text: "bansos-watcher (cron 6h, sumber: bansos.json upstream)" },
     }],
   };
 }
@@ -127,35 +111,48 @@ function buildEmbed(opts) {
 async function main() {
   const webhook = process.env.DISCORD_WEBHOOK_URL;
   if (!webhook) {
-    console.error('DISCORD_WEBHOOK_URL env tidak di-set. Lewati notifikasi, hanya update state.');
+    console.error("DISCORD_WEBHOOK_URL env tidak di-set. Lewati notifikasi, hanya update state.");
   }
 
   const prev = loadState();
-  const html = await fetchList();
-  const parsed = parseCards(html);
-  const curr = parsed.slugs;
-  const titles = parsed.titles;
+  let curr = [];
+  let titles = new Map();
+  try {
+    const items = await fetchJson();
+    if (!Array.isArray(items)) throw new Error("JSON bukan array");
+    curr = items.map(function (it) { return it.id; }).filter(Boolean);
+    titles = buildIdTitleMap(items);
+    console.log("source=json");
+  } catch (e) {
+    console.error("JSON fetch gagal, fallback ke HTML:", e.message);
+    const fb = await fetchHtmlFallback();
+    curr = fb.ids;
+    titles = fb.titles;
+    console.log("source=html_fallback");
+  }
+
   const result = diff(prev, curr);
   const added = result.added;
   const removed = result.removed;
   const changed = result.changed;
 
-  console.log('prev=' + prev.length + ' curr=' + curr.length + ' added=' + added.length + ' removed=' + removed.length);
+  console.log("prev=" + prev.length + " curr=" + curr.length + " added=" + added.length + " removed=" + removed.length);
 
   if (changed) {
     saveState(curr);
-    console.log('state.json di-update');
+    console.log("state.json di-update");
     if (webhook) {
       const embed = buildEmbed({ added: added, removed: removed, titles: titles, total: curr.length });
       await postDiscord(webhook, embed);
-      console.log('Discord notifikasi terkirim');
+      console.log("Discord notifikasi terkirim");
     }
   } else {
-    console.log('Tidak ada perubahan, skip');
+    console.log("Tidak ada perubahan, skip");
   }
 }
 
 main().catch(function (e) {
-  console.error('ERROR:', e.message);
+  console.error("ERROR:", e.message);
   process.exit(1);
 });
+

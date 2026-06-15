@@ -2,7 +2,7 @@
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '5,11,17,23 * * *'
   workflow_dispatch:
     description: 'Trigger manual untuk tes notifikasi'
 
