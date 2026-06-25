@@ -1,13 +1,10 @@
-﻿// Bansos Watcher - fetch upstream JSON, diff ids, notify Discord.
+﻿// Bansos Watcher - fetch upstream data, diff ids, notify Discord.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_PATH = path.join(__dirname, "..", "state.json");
-// Upstream JSON: same data source used by bansos.dev SvelteKit site.
-const JSON_URL = "https://raw.githubusercontent.com/wauputr4/bansos/main/src/lib/data/bansos.json";
-// Fallback HTML scrape in case JSON is unavailable.
 const LIST_URL = "https://bansos.dev/list/";
 
 function loadState() {
@@ -26,29 +23,43 @@ function saveState(ids) {
   fs.renameSync(tmp, STATE_PATH);
 }
 
-async function fetchJson() {
-  const r = await fetch(JSON_URL, { headers: { "User-Agent": "bansos-watcher/2.0" } });
-  if (!r.ok) throw new Error("JSON HTTP " + r.status);
-  return await r.json();
-}
-
-async function fetchHtmlFallback() {
+async function fetchBansosData() {
   const r = await fetch(LIST_URL, { headers: { "User-Agent": "bansos-watcher/2.0" } });
   if (!r.ok) throw new Error("HTML HTTP " + r.status);
   const html = await r.text();
-  const ids = new Set();
-  const re = /href="(?:\.\.\/)?\/list\/([a-zA-Z0-9_-]+)\/?\//g;
-  let m;
-  while ((m = re.exec(html)) !== null) ids.add(m[1]);
-  return { ids: Array.from(ids), titles: new Map() };
-}
 
-function buildIdTitleMap(items) {
-  const m = new Map();
-  for (const it of items) {
-    if (it && typeof it.id === "string") m.set(it.id, it.title || it.id);
+  // Find all modulepreload chunk URLs from the SvelteKit app
+  const chunkRe = /_app\/immutable\/chunks\/([a-zA-Z0-9]+)\.js/g;
+  const chunkUrls = [];
+  let m;
+  while ((m = chunkRe.exec(html)) !== null) {
+    chunkUrls.push("https://bansos.dev/_app/immutable/chunks/" + m[1] + ".js");
   }
-  return m;
+
+  // Search each chunk for the embedded bansos JSON data
+  for (const url of chunkUrls) {
+    const cr = await fetch(url, { headers: { "User-Agent": "bansos-watcher/2.0" } });
+    if (!cr.ok) continue;
+    const js = await cr.text();
+    const dataMatch = js.match(/JSON\.parse\(`([\s\S]*?)`\)/);
+    if (!dataMatch) continue;
+
+    const rawJson = dataMatch[1];
+    const idRe = /"id":"([^"]+)"/g;
+    const titleRe = /"title":"([^"]+)"/g;
+    const ids = [];
+    const titles = [];
+    let im;
+    while ((im = idRe.exec(rawJson)) !== null) ids.push(im[1]);
+    while ((im = titleRe.exec(rawJson)) !== null) titles.push(im[1]);
+    if (ids.length === 0) continue;
+
+    const titleMap = new Map();
+    ids.forEach(function (id, i) { titleMap.set(id, titles[i] || id); });
+    return { ids: ids, titles: titleMap, source: url };
+  }
+
+  throw new Error("Tidak dapat menemukan data bansos di chunk manapun");
 }
 
 function diff(prev, curr) {
@@ -103,7 +114,7 @@ function buildEmbed(opts) {
       color: added.length > 0 ? 0x22c55e : 0xef4444,
       fields: fields,
       timestamp: new Date().toISOString(),
-      footer: { text: "bansos-watcher (cron 6h, sumber: bansos.json upstream)" },
+      footer: { text: "bansos-watcher (cron 6h, sumber: bansos.dev JS chunk)" },
     }],
   };
 }
@@ -118,17 +129,13 @@ async function main() {
   let curr = [];
   let titles = new Map();
   try {
-    const items = await fetchJson();
-    if (!Array.isArray(items)) throw new Error("JSON bukan array");
-    curr = items.map(function (it) { return it.id; }).filter(Boolean);
-    titles = buildIdTitleMap(items);
-    console.log("source=json");
+    const data = await fetchBansosData();
+    curr = data.ids;
+    titles = data.titles;
+    console.log("source=" + data.source);
   } catch (e) {
-    console.error("JSON fetch gagal, fallback ke HTML:", e.message);
-    const fb = await fetchHtmlFallback();
-    curr = fb.ids;
-    titles = fb.titles;
-    console.log("source=html_fallback");
+    console.error("Data fetch gagal:", e.message);
+    throw e;
   }
 
   const result = diff(prev, curr);
