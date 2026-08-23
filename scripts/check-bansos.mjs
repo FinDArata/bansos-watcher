@@ -5,8 +5,20 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_PATH = path.join(__dirname, "..", "state.json");
+// Primary: struktur data baru upstream — satu folder per listing (src/lib/data/bansos/<slug>/index.json)
+const GITHUB_CONTENTS_URL = "https://api.github.com/repos/wauputr4/bansos/contents/src/lib/data/bansos";
+const GITHUB_INDEX_URL = "https://raw.githubusercontent.com/wauputr4/bansos/main/src/lib/data/bansos/";
+// Fallback: artifact lama, tidak di-update upstream sejak ~22 Juli 2026
 const RAW_JSON_URL = "https://gitlab.com/wauputr4/bansos/-/raw/main/src/lib/data/bansos.json";
 const LIST_URL = "https://bansos.dev/list/";
+const NON_LISTING_DIRS = new Set(["contributors", "schema"]);
+const FETCH_OPTS = { headers: { "User-Agent": "bansos-watcher/3.0", "Accept": "application/vnd.github+json" } };
+
+async function fetchJson(url) {
+  const r = await fetch(url, { ...FETCH_OPTS, signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error("HTTP " + r.status + " untuk " + url);
+  return r.json();
+}
 
 function loadState() {
   try {
@@ -25,22 +37,35 @@ function saveState(ids) {
 }
 
 async function fetchBansosData() {
-  // Method 1 (primary): fetch raw bansos.json directly from GitLab source repo
+  // Method 1 (primary): daftar folder listing via GitHub Contents API
   try {
-    const r = await fetch(RAW_JSON_URL, { headers: { "User-Agent": "bansos-watcher/2.0" } });
-    if (r.ok) {
-      const data = await r.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const ids = data.map(function (item) { return item.id; });
-        const titleMap = new Map();
-        data.forEach(function (item) { titleMap.set(item.id, item.title); });
-        return { ids: ids, titles: titleMap, source: RAW_JSON_URL };
-      }
+    const entries = await fetchJson(GITHUB_CONTENTS_URL);
+    const ids = Array.isArray(entries)
+      ? entries.filter(function (e) { return e.type === "dir" && !NON_LISTING_DIRS.has(e.name); })
+          .map(function (e) { return e.name; })
+      : [];
+    if (ids.length > 0) {
+      return { ids: ids, titles: new Map(), source: GITHUB_CONTENTS_URL };
     }
-  } catch (_) { /* fallthrough */ }
+  } catch (e) {
+    console.error("GitHub contents API gagal, fallback berikutnya:", e.message);
+  }
 
-  // Fallback: scrape from bansos.dev website
-  const r = await fetch(LIST_URL, { headers: { "User-Agent": "bansos-watcher/2.0" } });
+  // Method 2: raw bansos.json lama dari GitLab (stale, hanya fallback)
+  try {
+    const data = await fetchJson(RAW_JSON_URL);
+    if (Array.isArray(data) && data.length > 0) {
+      const ids = data.map(function (item) { return item.id; });
+      const titleMap = new Map();
+      data.forEach(function (item) { titleMap.set(item.id, item.title); });
+      return { ids: ids, titles: titleMap, source: RAW_JSON_URL };
+    }
+  } catch (e) {
+    console.error("GitLab raw JSON gagal, fallback scraping:", e.message);
+  }
+
+  // Method 3 & 4: scrape dari website bansos.dev
+  const r = await fetch(LIST_URL, { headers: { "User-Agent": "bansos-watcher/3.0" }, signal: AbortSignal.timeout(15000) });
   if (!r.ok) throw new Error("HTML HTTP " + r.status);
   const html = await r.text();
 
@@ -105,9 +130,22 @@ function buildEmbed(opts) {
       color: added.length > 0 ? 0x22c55e : 0xef4444,
       fields: fields,
       timestamp: new Date().toISOString(),
-      footer: { text: "bansos-watcher (cron 6h, sumber: GitLab bansos.json)" },
+      footer: { text: "bansos-watcher (cron 4x/hari, sumber: GitHub wauputr4/bansos)" },
     }],
   };
+}
+
+// Isi judul hanya untuk item yang berubah (added/removed) — hemat request, tidak fetch 100+ file tiap run.
+async function enrichTitles(titles, slugs) {
+  await Promise.all(slugs.map(async function (slug) {
+    if (titles.has(slug)) return;
+    try {
+      const data = await fetchJson(GITHUB_INDEX_URL + encodeURIComponent(slug) + "/index.json");
+      titles.set(slug, data.title || slug);
+    } catch (_) {
+      titles.set(slug, slug);
+    }
+  }));
 }
 
 async function extractFromChunks(html) {
@@ -121,7 +159,7 @@ async function extractFromChunks(html) {
 
   // Search each chunk for the embedded bansos JSON data
   for (const url of chunkUrls) {
-    const cr = await fetch(url, { headers: { "User-Agent": "bansos-watcher/2.0" } });
+    const cr = await fetch(url, { headers: { "User-Agent": "bansos-watcher/3.0" }, signal: AbortSignal.timeout(15000) });
     if (!cr.ok) continue;
     const js = await cr.text();
     const dataMatch = js.match(/JSON\.parse\(`([\s\S]*?)`\)/);
@@ -191,6 +229,7 @@ async function main() {
   console.log("prev=" + prev.length + " curr=" + curr.length + " added=" + added.length + " removed=" + removed.length);
 
   if (changed) {
+    await enrichTitles(titles, added.concat(removed));
     saveState(curr);
     console.log("state.json di-update");
     if (webhook) {

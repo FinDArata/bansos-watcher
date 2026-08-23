@@ -2,12 +2,12 @@
 
 Notifikasi otomatis ke Discord channel ketika daftar bansos di [bansos.dev](https://bansos.dev/list/) bertambah atau berkurang.
 
-Jalan setiap 30 menit via GitHub Actions (cloud, tidak perlu PC nyala).
+Jalan 4x sehari via GitHub Actions (cloud, tidak perlu PC nyala).
 
 ## Cara kerja
 
-1. GitHub Actions menjalankan scripts/check-bansos.mjs setiap 30 menit.
-2. Script fetch HTML bansos.dev/list/, parse kartu bansos (berdasarkan slug dari URL /list/<slug>/).
+1. GitHub Actions menjalankan scripts/check-bansos.mjs 4x sehari.
+2. Script membaca daftar listing dari GitHub API repo [wauputr4/bansos](https://github.com/wauputr4/bansos) (folder `src/lib/data/bansos/<slug>/`); judul item baru diambil dari `index.json` masing-masing. Kalau API gagal, fallback ke raw JSON GitLab lama lalu scraping bansos.dev.
 3. Bandingkan himpunan slug dengan state.json (commit sebelumnya).
 4. Jika ada slug baru atau hilang, kirim embed Discord ke webhook dan update state.json.
 5. state.json di-commit balik ke repo.
