@@ -1,5 +1,6 @@
 {
   "ids": [
+    "1412-api-github-registration",
     "adobe-creative-cloud-pro-trial",
     "aerolink-free-credits",
     "aerolink-starter-free-trial",
@@ -7,6 +8,7 @@
     "agentrouter-free-250-ai-credit",
     "agentrouter-free-50-credit-daily-checkin",
     "agentrouter-free-credits",
+    "ai-family-api-registration-checkin-referral",
     "ai-hub-free-plan",
     "ai-livscene-free-models",
     "ai-router-registration-and-daily-checkin-rewards",
@@ -23,6 +25,7 @@
     "codecrafters-free-token",
     "conduit-trial-credit-500",
     "dahono-labs-ai-api",
+    "dcloud-xplore-free-trial",
     "deepseek-free-token",
     "digitalocean-hatch",
     "diskon-free-hosting",
@@ -59,6 +62,7 @@
     "justdowork-free-50-ai-credit-bonus-check-in-harian",
     "kie-ai-api-discount-credit",
     "kimchi-dev-serverless-ai",
+    "kira-ai-free-50000-tokens-referral",
     "kktoken-free-75-credit-bonus-referral",
     "liminality-free-checkin",
     "lovable-free-pro-plan",
@@ -110,5 +114,5 @@
     "zenmux-glm-52-free",
     "zyloo-free-200-credit-post"
   ],
-  "updatedAt": "2026-09-01T15:24:39.213Z"
+  "updatedAt": "2026-09-13T10:07:51.445Z"
 }
